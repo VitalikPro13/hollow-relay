@@ -1,5 +1,6 @@
 #include <App.h>
 #include <sodium.h>
+#include <openssl/ssl.h>
 #include <csignal>
 #include <atomic>
 #include <algorithm>
@@ -64,6 +65,15 @@ int main(int argc, char** argv) {
         .cert_file_name = config.cert_file.c_str(),
         .ssl_prefer_low_memory_usage = 1,
     });
+
+    // Enable TLS session resumption (session tickets)
+    // Reconnecting clients reuse cached session keys — ~10x faster handshake
+    auto* ssl_ctx = static_cast<SSL_CTX*>(app.getNativeHandle());
+    if (ssl_ctx) {
+        SSL_CTX_set_session_cache_mode(ssl_ctx, SSL_SESS_CACHE_SERVER);
+        SSL_CTX_sess_set_cache_size(ssl_ctx, 20000);
+        fprintf(stderr, "[main] TLS session resumption enabled (cache: 20k)\n");
+    }
 
     setup_ws_handler(app, state);
     setup_http_handlers(app, state, config);
