@@ -308,6 +308,88 @@ static void handle_binary_direct(PerSocketData* data,
     send_to_peer(tit->second, forwarded, uWS::OpCode::BINARY);
 }
 
+static void handle_binary_msg(PerSocketData* data,
+                               std::string_view raw, RelayState& state) {
+    // Parse: [0x03][room\0][payload]
+    if (raw.size() < 3) return;
+
+    auto room_nul = raw.find('\0', 1);
+    if (room_nul == std::string_view::npos) return;
+
+    std::string_view room_code = raw.substr(1, room_nul - 1);
+    std::string room_str(room_code);
+
+    auto rit = state.ws_rooms.find(room_str);
+    if (rit == state.ws_rooms.end()) return;
+
+    if (rit->second.peers.find(data->peer_id) == rit->second.peers.end()) return;
+
+    size_t payload_start = room_nul + 1;
+    std::string_view payload = (payload_start < raw.size())
+        ? raw.substr(payload_start) : std::string_view{};
+
+    // Build: [0x05][room\0][sender\0][payload]
+    std::string forwarded;
+    forwarded.reserve(1 + room_code.size() + 1 + data->peer_id.size() + 1 + payload.size());
+    forwarded.push_back(0x05);
+    forwarded.append(room_code);
+    forwarded.push_back(0x00);
+    forwarded.append(data->peer_id);
+    forwarded.push_back(0x00);
+    forwarded.append(payload);
+
+    for (auto& [pid, peer_ws] : rit->second.peers) {
+        if (pid != data->peer_id) {
+            send_to_peer(peer_ws, forwarded, uWS::OpCode::BINARY);
+        }
+    }
+}
+
+static void handle_binary_direct_msg(PerSocketData* data,
+                                      std::string_view raw, RelayState& state) {
+    // Parse: [0x04][room\0][target\0][payload]
+    if (raw.size() < 5) return;
+
+    auto room_nul = raw.find('\0', 1);
+    if (room_nul == std::string_view::npos) return;
+
+    std::string_view room_code = raw.substr(1, room_nul - 1);
+
+    size_t peer_start = room_nul + 1;
+    if (peer_start >= raw.size()) return;
+
+    auto peer_nul = raw.find('\0', peer_start);
+    if (peer_nul == std::string_view::npos) return;
+
+    std::string_view target_peer = raw.substr(peer_start, peer_nul - peer_start);
+
+    size_t payload_start = peer_nul + 1;
+    std::string_view payload = (payload_start < raw.size())
+        ? raw.substr(payload_start) : std::string_view{};
+
+    std::string room_str(room_code);
+    auto rit = state.ws_rooms.find(room_str);
+    if (rit == state.ws_rooms.end()) return;
+
+    if (rit->second.peers.find(data->peer_id) == rit->second.peers.end()) return;
+
+    std::string target_str(target_peer);
+    auto tit = rit->second.peers.find(target_str);
+    if (tit == rit->second.peers.end()) return;
+
+    // Build: [0x06][room\0][sender\0][payload]
+    std::string forwarded;
+    forwarded.reserve(1 + room_code.size() + 1 + data->peer_id.size() + 1 + payload.size());
+    forwarded.push_back(0x06);
+    forwarded.append(room_code);
+    forwarded.push_back(0x00);
+    forwarded.append(data->peer_id);
+    forwarded.push_back(0x00);
+    forwarded.append(payload);
+
+    send_to_peer(tit->second, forwarded, uWS::OpCode::BINARY);
+}
+
 static void handle_text_message(SSLWebSocket* ws, PerSocketData* data,
                                  std::string_view message, RelayState& state) {
     json j;
@@ -410,6 +492,12 @@ void setup_ws_handler(uWS::SSLApp& app, RelayState& state) {
                             break;
                         case 0x02:
                             handle_binary_direct(data, message, state);
+                            break;
+                        case 0x03:
+                            handle_binary_msg(data, message, state);
+                            break;
+                        case 0x04:
+                            handle_binary_direct_msg(data, message, state);
                             break;
                         default:
                             break;
