@@ -6,6 +6,12 @@ Built with [uWebSockets](https://github.com/uNetworking/uWebSockets) (C++) for m
 
 This repository serves as the public hub for the Hollow project. The relay is open-source; the Hollow app itself is proprietary.
 
+## Documentation
+
+- **[WHITEPAPER.md](WHITEPAPER.md)** — Full Hollow protocol specification: cryptographic architecture, networking model, threat model, and security properties.
+- **[Privacy Policy](legal/PRIVACY_POLICY.md)** — What data exists, where it exists, and what we can and cannot access. TL;DR: nothing.
+- **[Terms of Use](legal/TERMS_OF_USE.md)** — Plain-language terms. You own your copy, your data, your keys.
+
 ## Contributing & Issues
 
 This is the place to interact with the Hollow project! You can:
@@ -22,7 +28,7 @@ I want to build Hollow together with the community. If you find a bug in the app
 The relay is a lightweight, stateless message router. It does **not** store messages, decrypt content, or hold user data. All it does is:
 
 - **WebSocket rooms** — peers join named rooms and exchange end-to-end encrypted messages through the relay. The relay forwards opaque blobs; it cannot read them.
-- **Binary protocol** — `0x01` prefix for room broadcasts (e.g. encrypted messages), `0x02` prefix for targeted peer-to-peer delivery (e.g. file transfers, WebRTC signaling). The relay rewrites the target field to the sender field on forwarding.
+- **Binary protocol** — `0x01` for room broadcasts, `0x02` for targeted peer-to-peer delivery, `0x03`/`0x04` for bandwidth-optimized message broadcast/direct (25-42% savings vs JSON). The relay rewrites target fields to sender fields on forwarding.
 - **Signaling HTTP** — bootstrap peer discovery (`/register`, `/unregister`, `/bootstrap/{room}`) with Ed25519-signed requests.
 - **TURN credential generation** — time-limited HMAC-SHA1 credentials for NAT traversal via coturn (`/turn-credentials`).
 - **License key gating** — optional closed-alpha access control via a `keys.json` file, with 30-second hot-reload and active connection revocation.
