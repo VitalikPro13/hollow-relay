@@ -2,12 +2,13 @@
 
 High-performance WebSocket relay and signaling server for **Hollow** — a fully distributed, encrypted communication platform.
 
-Built with [uWebSockets](https://github.com/uNetworking/uWebSockets) (C++) for maximum connection density. A single $8/month VPS handles **~480,000 concurrent connections** at 14.5 KB per connection with native TLS.
+Built with [uWebSockets](https://github.com/uNetworking/uWebSockets) (C++) for maximum connection density. A single $8/month VPS handles **~572,000 concurrent connections** at 13.4 KB per connection with native TLS.
 
 This repository serves as the public hub for the Hollow project. The relay is open-source; the Hollow app itself is proprietary.
 
 ## Documentation
 
+- **[BENCHMARK.md](BENCHMARK.md)** — Stress test results: 44,600 simultaneous connections with per-connection memory analysis and capacity projections.
 - **[WHITEPAPER.md](WHITEPAPER.md)** — Full Hollow protocol specification: cryptographic architecture, networking model, threat model, and security properties.
 - **[Privacy Policy](legal/PRIVACY_POLICY.md)** — What data exists, where it exists, and what we can and cannot access. TL;DR: nothing.
 - **[Terms of Use](legal/TERMS_OF_USE.md)** — Plain-language terms. You own your copy, your data, your keys.
@@ -36,19 +37,20 @@ The relay is a lightweight, stateless message router. It does **not** store mess
 
 ## Performance
 
-Measured on an OVH VPS (4 vCPU / 8 GB RAM / 400 Mbps):
+Measured on an OVH VPS (4 vCPU / 8 GB RAM / 400 Mbps). Verified with 44,600 simultaneous authenticated WebSocket connections — see [BENCHMARK.md](BENCHMARK.md) for full methodology and data.
 
 | Metric | Value |
 |---|---|
-| Per-connection memory | **14.5 KB** |
-| Connections on 8 GB VPS | **~480,000** |
-| Connections on 12 GB VPS | **~750,000** |
-| Idle relay RSS | **10.5 MB** |
+| Per-connection memory | **13.4 KB** |
+| Connections on 8 GB VPS | **~572,000** |
+| Connections on 12 GB VPS | **~878,000** |
+| Idle relay RSS | **17 MB** |
 | Binary size | **636 KB** |
 | Threads | **1** (single-threaded epoll) |
 | Auth throughput | **800+/sec** |
+| Scaling behavior | **Perfectly linear** (verified to 44.6k, 0 failures, 0 drops) |
 
-Key: `SSL_MODE_RELEASE_BUFFERS` frees OpenSSL's 16 KB read/write buffers between messages, cutting per-connection cost in half for idle connections.
+Key: `SSL_MODE_RELEASE_BUFFERS` frees OpenSSL's 16 KB read/write buffers between messages, keeping per-connection cost low for idle connections. Scaling is verified to be perfectly linear with no memory cliffs or degradation at high connection counts.
 
 ## Security properties
 
@@ -162,7 +164,7 @@ The relay is single-threaded by design. uWebSockets' epoll event loop handles al
 
 ## Legacy Rust relay
 
-The `legacy-rust/` directory contains the original Rust implementation (Axum/tokio/tungstenite). It served as the production relay through early development but was superseded by the C++ rewrite for a 12x connection density improvement (175 KB/conn to 14.5 KB/conn). The Rust code is preserved for reference but is no longer maintained.
+The `legacy-rust/` directory contains the original Rust implementation (Axum/tokio/tungstenite). It served as the production relay through early development but was superseded by the C++ rewrite for a 13x connection density improvement (175 KB/conn to 13.4 KB/conn). The Rust code is preserved for reference but is no longer maintained.
 
 ## License
 
