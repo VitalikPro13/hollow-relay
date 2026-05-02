@@ -57,7 +57,7 @@ Key: `SSL_MODE_RELEASE_BUFFERS` frees OpenSSL's 16 KB read/write buffers between
 - All WebSocket authentication uses **Ed25519 signature verification** with 60-second timestamp skew protection.
 - **Native TLS** via OpenSSL (TLS 1.3, AES-256-GCM) — no reverse proxy needed.
 - **Backpressure handling** — 64 KB soft cap per socket (`getBufferedAmount()`), 256 KB hard ceiling. Slow consumers get messages dropped (clients auto-resync via CRDT/gossip).
-- **Message size limits** (10 MB), per-peer room caps (100 rooms), binary frame rate limiting (20 tokens/sec, burst 100).
+- **Message size limits** (10 MB), per-peer room caps (2,000 rooms), binary frame rate limiting (20 tokens/sec, burst 100).
 - **Room membership enforcement** — peers cannot send to rooms they haven't joined.
 - TURN credentials are time-limited (1 hour TTL) and derived from an environment variable (`TURN_SECRET`), never hardcoded.
 

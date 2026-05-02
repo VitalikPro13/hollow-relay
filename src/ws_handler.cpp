@@ -7,7 +7,7 @@
 using json = nlohmann::json;
 
 static constexpr uint64_t TIMESTAMP_SKEW_SECS = 60;
-static constexpr size_t MAX_ROOMS_PER_PEER = 100;
+static constexpr size_t MAX_ROOMS_PER_PEER = 2000;
 
 static bool is_valid_room_code(std::string_view room) {
     if (room.empty() || room.size() > 128) return false;
