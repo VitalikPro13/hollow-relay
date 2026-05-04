@@ -29,7 +29,7 @@ I want to build Hollow together with the community. If you find a bug in the app
 The relay is a lightweight, stateless message router. It does **not** store messages, decrypt content, or hold user data. All it does is:
 
 - **WebSocket rooms** — peers join named rooms and exchange end-to-end encrypted messages through the relay. The relay forwards opaque blobs; it cannot read them.
-- **Binary protocol** — `0x01` for room broadcasts, `0x02` for targeted peer-to-peer delivery, `0x03`/`0x04` for bandwidth-optimized message broadcast/direct (25-42% savings vs JSON). The relay rewrites target fields to sender fields on forwarding.
+- **Binary protocol** — `0x01` for room broadcasts, `0x02` for targeted peer-to-peer delivery, `0x03`/`0x04` for bandwidth-optimized message broadcast/direct (25-42% savings vs JSON), `0x07`/`0x08` for topic-routed channel messages (per-channel pub/sub). The relay rewrites target fields to sender fields on forwarding.
 - **Signaling HTTP** — bootstrap peer discovery (`/register`, `/unregister`, `/bootstrap/{room}`) with Ed25519-signed requests.
 - **TURN credential generation** — time-limited HMAC-SHA1 credentials for NAT traversal via coturn (`/turn-credentials`).
 - **License key gating** — optional closed-alpha access control via a `keys.json` file, with 30-second hot-reload and active connection revocation.
@@ -56,8 +56,8 @@ Key: `SSL_MODE_RELEASE_BUFFERS` frees OpenSSL's 16 KB read/write buffers between
 
 - All WebSocket authentication uses **Ed25519 signature verification** with 60-second timestamp skew protection.
 - **Native TLS** via OpenSSL (TLS 1.3, AES-256-GCM) — no reverse proxy needed.
-- **Backpressure handling** — 64 KB soft cap per socket (`getBufferedAmount()`), 256 KB hard ceiling. Slow consumers get messages dropped (clients auto-resync via CRDT/gossip).
-- **Message size limits** (10 MB), per-peer room caps (2,000 rooms), binary frame rate limiting (20 tokens/sec, burst 100).
+- **Backpressure handling** — 2 MB soft cap per socket (`getBufferedAmount()`), 4 MB hard ceiling. Slow consumers get messages dropped with stderr logging (clients auto-resync via CRDT/gossip).
+- **Rate limiting** — binary frame token bucket (100 burst, 20/sec refill). Text frame 1 MB size cap. Per-peer room caps (2,000 rooms).
 - **Room membership enforcement** — peers cannot send to rooms they haven't joined.
 - TURN credentials are time-limited (1 hour TTL) and derived from an environment variable (`TURN_SECRET`), never hardcoded.
 

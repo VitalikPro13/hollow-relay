@@ -28,6 +28,10 @@ static void send_json(SSLWebSocket* ws, const json& j) {
 static void send_to_peer(SSLWebSocket* ws, std::string_view data, uWS::OpCode op) {
     if (ws->getBufferedAmount() < MAX_BACKPRESSURE_SOFT) {
         ws->send(data, op);
+    } else {
+        auto* d = ws->getUserData();
+        fprintf(stderr, "[RELAY] Backpressure drop: peer=%s buffered=%zu msg_size=%zu\n",
+                d ? d->peer_id.c_str() : "?", ws->getBufferedAmount(), data.size());
     }
 }
 
@@ -388,6 +392,76 @@ static void handle_binary_direct_msg(PerSocketData* data,
     send_to_peer(tit->second, forwarded, uWS::OpCode::BINARY);
 }
 
+static void handle_subscribe(PerSocketData* data, const std::string& room,
+                              const json& topics_arr) {
+    if (!data->authenticated) return;
+    if (topics_arr.empty()) {
+        data->subscriptions.erase(room);
+    } else {
+        auto& subs = data->subscriptions[room];
+        subs.clear();
+        for (const auto& t : topics_arr) {
+            if (t.is_string()) subs.insert(t.get<std::string>());
+        }
+    }
+}
+
+static void handle_binary_topic_msg(PerSocketData* data,
+                                     std::string_view raw, RelayState& state) {
+    // Parse: [0x07][room\0][topic\0][payload]
+    if (raw.size() < 4) return;
+
+    auto room_nul = raw.find('\0', 1);
+    if (room_nul == std::string_view::npos) return;
+
+    std::string_view room_code = raw.substr(1, room_nul - 1);
+    std::string room_str(room_code);
+
+    size_t topic_start = room_nul + 1;
+    if (topic_start >= raw.size()) return;
+
+    auto topic_nul = raw.find('\0', topic_start);
+    if (topic_nul == std::string_view::npos) return;
+
+    std::string_view topic = raw.substr(topic_start, topic_nul - topic_start);
+    std::string topic_str(topic);
+
+    auto rit = state.ws_rooms.find(room_str);
+    if (rit == state.ws_rooms.end()) return;
+
+    if (rit->second.peers.find(data->peer_id) == rit->second.peers.end()) return;
+
+    size_t payload_start = topic_nul + 1;
+    std::string_view payload = (payload_start < raw.size())
+        ? raw.substr(payload_start) : std::string_view{};
+
+    // Build: [0x08][room\0][topic\0][sender\0][payload]
+    std::string forwarded;
+    forwarded.reserve(1 + room_code.size() + 1 + topic.size() + 1 + data->peer_id.size() + 1 + payload.size());
+    forwarded.push_back(0x08);
+    forwarded.append(room_code);
+    forwarded.push_back(0x00);
+    forwarded.append(topic);
+    forwarded.push_back(0x00);
+    forwarded.append(data->peer_id);
+    forwarded.push_back(0x00);
+    forwarded.append(payload);
+
+    for (auto& [pid, peer_ws] : rit->second.peers) {
+        if (pid == data->peer_id) continue;
+
+        auto* peer_data = peer_ws->getUserData();
+        auto sit = peer_data->subscriptions.find(room_str);
+        if (sit == peer_data->subscriptions.end()) {
+            // No subscriptions for this room — wildcard, send everything
+            send_to_peer(peer_ws, forwarded, uWS::OpCode::BINARY);
+        } else if (sit->second.count(topic_str)) {
+            // Peer is subscribed to this topic
+            send_to_peer(peer_ws, forwarded, uWS::OpCode::BINARY);
+        }
+    }
+}
+
 static void handle_text_message(SSLWebSocket* ws, PerSocketData* data,
                                  std::string_view message, RelayState& state) {
     json j;
@@ -408,21 +482,25 @@ static void handle_text_message(SSLWebSocket* ws, PerSocketData* data,
     } else if (type == "direct") {
         handle_direct(data, j.value("room", ""), j.value("target", ""),
                       j.value("data", ""), state);
+    } else if (type == "subscribe") {
+        handle_subscribe(data, j.value("room", ""),
+                         j.contains("topics") ? j["topics"] : json::array());
     }
 }
 
-static bool check_rate_limit(PerSocketData* data) {
+static bool check_binary_rate_limit(PerSocketData* data) {
     auto now = std::chrono::steady_clock::now();
-    double elapsed = std::chrono::duration<double>(now - data->rate_last_refill).count();
+    double elapsed = std::chrono::duration<double>(now - data->binary_rate_last_refill).count();
     uint32_t refill = static_cast<uint32_t>(elapsed * 20.0);
     if (refill > 0) {
         data->binary_rate_tokens = std::min(data->binary_rate_tokens + refill, 100u);
-        data->rate_last_refill = now;
+        data->binary_rate_last_refill = now;
     }
     if (data->binary_rate_tokens == 0) return false;
     data->binary_rate_tokens--;
     return true;
 }
+
 
 static void cleanup_peer(RelayState& state, const std::string& peer_id) {
     state.license.release_key(peer_id);
@@ -442,14 +520,14 @@ static void cleanup_peer(RelayState& state, const std::string& peer_id) {
 void setup_ws_handler(uWS::SSLApp& app, RelayState& state) {
     app.ws<PerSocketData>("/ws", {
         .compression = uWS::DISABLED,
-        .maxPayloadLength = 10 * 1024 * 1024,
+        .maxPayloadLength = 64 * 1024 * 1024,
         .idleTimeout = 120,
-        .maxBackpressure = 256 * 1024,
+        .maxBackpressure = 4 * 1024 * 1024,
         .sendPingsAutomatically = true,
 
         .open = [&state](SSLWebSocket* ws) {
             auto* data = ws->getUserData();
-            data->rate_last_refill = std::chrono::steady_clock::now();
+            data->binary_rate_last_refill = std::chrono::steady_clock::now();
 
             // 10-second auth timeout
             auto* loop = reinterpret_cast<struct us_loop_t*>(uWS::Loop::get());
@@ -480,9 +558,10 @@ void setup_ws_handler(uWS::SSLApp& app, RelayState& state) {
             }
 
             if (opCode == uWS::OpCode::TEXT) {
+                if (message.size() > 1024 * 1024) return;
                 handle_text_message(ws, data, message, state);
             } else if (opCode == uWS::OpCode::BINARY) {
-                if (!check_rate_limit(data)) return;
+                if (!check_binary_rate_limit(data)) return;
                 if (message.size() > 1) {
                     switch (static_cast<uint8_t>(message[0])) {
                         case 0x01:
@@ -496,6 +575,9 @@ void setup_ws_handler(uWS::SSLApp& app, RelayState& state) {
                             break;
                         case 0x04:
                             handle_binary_direct_msg(data, message, state);
+                            break;
+                        case 0x07:
+                            handle_binary_topic_msg(data, message, state);
                             break;
                         default:
                             break;
