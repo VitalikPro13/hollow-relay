@@ -9,15 +9,14 @@
 #include <App.h>
 #include "license.h"
 
-constexpr size_t MAX_BACKPRESSURE_SOFT = 2 * 1024 * 1024;
+// No soft backpressure — let uWebSockets buffer handle delivery.
+// Hard limit (.maxBackpressure = 64MB) catches truly dead connections.
 
 using SSLWebSocket = uWS::WebSocket<true, true, struct PerSocketData>;
 
 struct PerSocketData {
     std::string peer_id;
     bool authenticated = false;
-    uint32_t binary_rate_tokens = 100;
-    std::chrono::steady_clock::time_point binary_rate_last_refill;
     struct us_timer_t* auth_timer = nullptr;
     std::string license_key;
 

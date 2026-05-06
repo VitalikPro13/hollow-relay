@@ -7,7 +7,7 @@
 using json = nlohmann::json;
 
 static constexpr uint64_t TIMESTAMP_SKEW_SECS = 60;
-static constexpr size_t MAX_ROOMS_PER_PEER = 2000;
+static constexpr size_t MAX_ROOMS_PER_PEER = 10000;
 
 static bool is_valid_room_code(std::string_view room) {
     if (room.empty() || room.size() > 128) return false;
@@ -26,13 +26,7 @@ static void send_json(SSLWebSocket* ws, const json& j) {
 }
 
 static void send_to_peer(SSLWebSocket* ws, std::string_view data, uWS::OpCode op) {
-    if (ws->getBufferedAmount() < MAX_BACKPRESSURE_SOFT) {
-        ws->send(data, op);
-    } else {
-        auto* d = ws->getUserData();
-        fprintf(stderr, "[RELAY] Backpressure drop: peer=%s buffered=%zu msg_size=%zu\n",
-                d ? d->peer_id.c_str() : "?", ws->getBufferedAmount(), data.size());
-    }
+    ws->send(data, op);
 }
 
 static void handle_auth(SSLWebSocket* ws, PerSocketData* data,
@@ -488,18 +482,8 @@ static void handle_text_message(SSLWebSocket* ws, PerSocketData* data,
     }
 }
 
-static bool check_binary_rate_limit(PerSocketData* data) {
-    auto now = std::chrono::steady_clock::now();
-    double elapsed = std::chrono::duration<double>(now - data->binary_rate_last_refill).count();
-    uint32_t refill = static_cast<uint32_t>(elapsed * 20.0);
-    if (refill > 0) {
-        data->binary_rate_tokens = std::min(data->binary_rate_tokens + refill, 100u);
-        data->binary_rate_last_refill = now;
-    }
-    if (data->binary_rate_tokens == 0) return false;
-    data->binary_rate_tokens--;
-    return true;
-}
+// Rate limiting removed — authenticated peers are trusted.
+// DoS protection via Ed25519 auth + license key revocation.
 
 
 static void cleanup_peer(RelayState& state, const std::string& peer_id) {
@@ -522,12 +506,11 @@ void setup_ws_handler(uWS::SSLApp& app, RelayState& state) {
         .compression = uWS::DISABLED,
         .maxPayloadLength = 64 * 1024 * 1024,
         .idleTimeout = 120,
-        .maxBackpressure = 4 * 1024 * 1024,
+        .maxBackpressure = 64 * 1024 * 1024,
         .sendPingsAutomatically = true,
 
         .open = [&state](SSLWebSocket* ws) {
             auto* data = ws->getUserData();
-            data->binary_rate_last_refill = std::chrono::steady_clock::now();
 
             // 10-second auth timeout
             auto* loop = reinterpret_cast<struct us_loop_t*>(uWS::Loop::get());
@@ -561,7 +544,6 @@ void setup_ws_handler(uWS::SSLApp& app, RelayState& state) {
                 if (message.size() > 1024 * 1024) return;
                 handle_text_message(ws, data, message, state);
             } else if (opCode == uWS::OpCode::BINARY) {
-                if (!check_binary_rate_limit(data)) return;
                 if (message.size() > 1) {
                     switch (static_cast<uint8_t>(message[0])) {
                         case 0x01:
