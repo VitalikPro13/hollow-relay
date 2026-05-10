@@ -1,10 +1,15 @@
 # Hollow Relay
 
+> [!CAUTION]
+> **This repository is archived and no longer maintained.**
+> The relay source code now lives in the main Hollow repository at **[VitalikPro13/HOLLOW](https://github.com/VitalikPro13/HOLLOW)** under `relay-uws/`.
+> All issues, pull requests, and development happen there. This repo is preserved for historical reference only.
+
+---
+
 High-performance WebSocket relay and signaling server for **Hollow** — a fully distributed, encrypted communication platform.
 
 Built with [uWebSockets](https://github.com/uNetworking/uWebSockets) (C++) for maximum connection density. A single $8/month VPS handles **~572,000 concurrent connections** at 13.4 KB per connection with native TLS.
-
-This repository serves as the public hub for the Hollow project. The relay is open-source; the Hollow app itself is proprietary.
 
 ## Documentation
 
